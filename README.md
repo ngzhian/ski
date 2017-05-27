@@ -1,7 +1,12 @@
-An experiment in SKI combinator calculus, below is the accompanying blog post,
-originally on [my blog](https://blog.ngzhian.com/ski.html)
+An experiment in SKI combinator calculus, below are the accompanying blog posts,
+originally on [my blog](https://blog.ngzhian.com):
+
+[SKI combinators - AST and Evaluating](https://blog.ngzhian.com/ski.html)
+[SKI combinators - Lambda to SKI](https://blog.ngzhian.com/ski2.html)
 
 ---
+
+# SKI combinators - AST and Evaluating
 
 S, K, and I are the name of three combinators.
 Perhaps surprisingly, these combinators together is sufficient to
@@ -149,3 +154,197 @@ Next up: translating terms in lambda calculus to SKI combinators.
 5. [bmjames' implementation in Erlang](https://gist.github.com/bmjames/745291/ab52ffdf8230bbec9bcf1059825ad6d3fd7186f5)
 6. [yager's implementation in Haskell](http://yager.io/HaSKI/HaSKI.html)
 7. [ac1235's implementation in Haskell's happy](https://github.com/ac1235/ski-combinator-calculus/blob/master/ski.y)
+
+---
+
+# SKI combinators - Lambda to SKI
+
+In a [previous post](./ski.html),
+we looked at what SKI combinators are, and how to encode and interpret them.
+We also mentioned that these 3 combinators form a Turing-complete language,
+because every lambda calculus term can be translated into an SKI combinator term.
+
+> Source code is available [here](https://github.com/ngzhian/ski)
+
+## Lambda Calculus
+
+The [lambda calculus](https://en.wikipedia.org/wiki/Lambda_calculus)
+is a simple Turing-complete language.
+
+[^1]: Wikipedia [Combinatory Logic](https://en.wikipedia.org/wiki/Combinatory_logic#Completeness_of_the_S-K_basis)
+
+
+Lambda calculus is made up of three terms:
+
+1. Variable, such as `x`,
+2. Lambda abstraction, such as `fun x -> x`,
+3. Application, such as `(y x)`.
+
+```ocaml
+(* lambda calculus AST *)
+type name = string
+type lambda =
+  | Var of name
+  | App of lambda * lambda
+  | Abs of name * lambda
+```
+
+Here's an example lambda term,
+representing the application of an identity function to an identity function:
+
+```ocaml
+App (Abs ('x', Var 'x'), Abs ('y', Var 'y'))
+```
+
+## Translating lambda to SKI
+
+Let us conjure an ideal function that will do such a translation,
+it should take a lambda term to an SKI term:
+
+```ocaml
+let convert (e : lambda) : ski = (??)
+```
+
+What this means is that we can either have a lambda term, or an ski term, with no in-betweens,
+i.e. we cannot have a lambda term containing an ski term.
+
+However, if we look at the translation rules,
+we find that we will need a intermediate structure that can hold both lambda terms
+and ski terms.
+
+For example in clause 5, `T[λx.λy.E] => T[λx.T[λy.E]]`,
+the translated term `T[λy.E]`, which by definition is an SKI term,
+is the body of a lambda abstraction.
+
+So it is helpful to define such a structure,
+which allows lambda calculus terms and SKI terms to coexist:
+
+```ocaml
+(* Intermediate AST for converting lambda calculus into SKI combinators.
+ * This is needed because when converting, intermediate terms can be
+ * a mixture of both lambda terms and SKI terms, for example
+ * a lambda expression with a SKI body, \x . K
+ * *)
+type ls =
+  | Var of name
+  | App of ls * ls
+  | Abs of name * ls
+  | Sl
+  | Kl
+  | Il
+  | Tl of ls * ls
+```
+
+We will also need a helper function to determine if a variable is free in an expression:
+
+```ocaml
+(* Is n free in the expression e? *)
+let free n (e : ls) =
+  (* Get free variables of an expression *)
+  let rec fv (e : ls) = match e with
+    | Var n -> [n]
+    | App (e1, e2) -> fv e1 @ fv e2
+    | Abs (n, e) -> List.filter (fun x -> x != n) (fv e)
+    | Tl (e1, e2) -> fv e1 @ fv e2
+    | _ -> []
+  in
+  List.mem n (fv e)
+```
+
+The core translation algorithm then follows the translation scheme
+described in the
+[Wikipedia article](https://en.wikipedia.org/wiki/Combinatory_logic#Completeness_of_the_S-K_basis).
+We make use of the intermediate structure, `ls`, when translating.
+The signature of this structure doesn't say much, it looks like an identity function,
+but the assumption is that the input term is converted from a lambda term,
+made up of `Var`, `App`, and `Abs`, and the output term will only contain
+`Sl`, `Kl`, `Il`, and `Tl`, i.e. the terms that can be converted
+directly into the SKI combinators.
+
+```ocaml
+(* This is the core algorithm to translate ls terms (made up of lambda)
+ * into ls terms (made up of SKI combinators).
+ * The clauses described here follows the rules of the T function described at
+ * https://en.wikipedia.org/wiki/Combinatory_logic#Completeness_of_the_S-K_basis
+ * *)
+let rec translate (e : ls) : ls = match e with
+  (* clause 1. *)
+  | Var x ->
+    Var x
+  (* clause 2. *)
+  | App (e1, e2) ->
+    App (translate e1, translate e2)
+  (* clause 3. *)
+  | Abs (x, e) when not (free x e) ->
+    App (Kl, translate e)
+  (* clause 4. *)
+  | Abs (n, Var n') ->
+    (* lambda x : x becomes identity *)
+    if n = n'
+    then Il
+    else failwith "error"
+  (* clause 5. *)
+  | Abs (x, Abs (y, e)) ->
+    if free x e
+    then translate (Abs (x, translate (Abs (y, e))))
+    else failwith "error"
+  (* clause 6. *)
+  | Abs (x, App (e1, e2)) ->
+    if free x e1 || free x e2
+    (* then App (Sl, App (translate (Abs (x, e1)), translate (Abs (x, e2)))) *)
+    then App (App (Sl, (translate (Abs (x, e1)))), translate (Abs (x, e2)))
+    else failwith "error"
+  | Kl -> Kl
+  | Sl -> Sl
+  | Il -> Il
+  | _ ->
+    failwith "no matches"
+```
+
+Finally we can write the top level `convert` function we imagined earlier:
+
+```ocaml
+(* Converts a lambda term into an SKI term *)
+let convert (e : lambda) : ski =
+  (* Convert lambda term into intermediate ls term *)
+  let rec ls_of_lambda (e : lambda) =
+    match e with
+    | Var x -> Var x
+    | App (e1, e2) -> App (ls_of_lambda e1, ls_of_lambda e2)
+    | Abs (x, e) -> Abs (x, ls_of_lambda e)
+  in
+  (* Convert intermediate ls term into ski term *)
+  let rec ski_of_ls (e : ls) : ski =
+    match e with
+    | Var _ -> failwith "should not have Var anymore"
+    | Abs _ -> failwith "should not have Abs anymore"
+    | App (e1, e2) -> T (ski_of_ls e1, ski_of_ls e2)
+    | Sl  -> S
+    | Kl  -> K
+    | Il  -> I
+    | Tl (e1, e2) -> T (ski_of_ls e1, ski_of_ls e2)
+  in
+  (* convert lambda term into ls term *)
+  let ls_term = ls_of_lambda e in
+  (* translate ls term of lambda into ls term of combinators *)
+  let ls_comb = translate ls_term in
+  (* convert ls term into ski *)
+  ski_of_ls ls_comb
+```
+
+Let's try it with the example given by Wikipedia:
+
+```ocaml
+(* Example lambda terms *)
+let l2 : lambda = Abs ("x", Abs ("y", App (Var "y", Var "x")))
+
+let _ = print_endline (string_of_ski (convert l2))
+```
+
+The output `T(T(S,T(K,T(S,I))),T(T(S,T(K,K)),I))`, is the same as `(S (K (S I)) (S (K K) I))`.
+
+## References
+
+1. Wikipedia [SKI Combinator calculus](https://en.wikipedia.org/wiki/SKI_combinator_calculus)
+2. Wikipedia [Combinatory Logic](https://en.wikipedia.org/wiki/Combinatory_logic)
+3. Wikipedia [Lambda Calculus](https://en.wikipedia.org/wiki/Lambda_calculus#Free_variables)
