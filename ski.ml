@@ -152,14 +152,14 @@ type ls =
   | Tl of ls * ls
 
 (* String representation of ls *)
-let rec string_of_lc (l : ls) : string = match l with
+let rec string_of_ls (l : ls) : string = match l with
     | Var x -> x
-    | App (e1, e2) -> "(" ^ (string_of_lc e1) ^ (string_of_lc e2) ^ ")"
-    | Abs (x, e) -> "\\" ^ x ^ (string_of_lc e)
+    | App (e1, e2) -> "(" ^ (string_of_ls e1) ^ (string_of_ls e2) ^ ")"
+    | Abs (x, e) -> "\\" ^ x ^ (string_of_ls e)
     | Sl  -> "S"
     | Kl  -> "K"
     | Il  -> "I"
-    | Tl (e1, e2) ->  "(T " ^ (string_of_lc e1) ^ (string_of_lc e2) ^ ")"
+    | Tl (e1, e2) ->  "(T " ^ (string_of_ls e1) ^ (string_of_ls e2) ^ ")"
 
 (* Is n free in the expression e? *)
 let free n (e : ls) =
@@ -173,10 +173,11 @@ let free n (e : ls) =
   in
   List.mem n (fv e)
 
-(* This is the core algorithm to convert lambda terms into SKI combinators *)
-(* Translates a lambda term into an intermediate structure that can hold both lambda and SKI *)
-(* the clauses described here follows the rules of the T function described at *)
-(* https://en.wikipedia.org/wiki/Combinatory_logic#Completeness_of_the_S-K_basis *)
+(* This is the core algorithm to translate ls terms (made up of lambda)
+ * into ls terms (made up of SKI combinators).
+ * The clauses described here follows the rules of the T function described at
+ * https://en.wikipedia.org/wiki/Combinatory_logic#Completeness_of_the_S-K_basis
+ * *)
 let rec translate (e : ls) : ls = match e with
   (* clause 1. *)
   | Var x ->
@@ -208,7 +209,7 @@ let rec translate (e : ls) : ls = match e with
   | Sl -> Sl
   | Il -> Il
   | _ ->
-    failwith ("no matches for " ^ (string_of_lc e))
+    failwith ("no matches for " ^ (string_of_ls e))
 
 (* Converts a lambda term into an SKI term *)
 let convert (e : lambda) : ski =
@@ -219,10 +220,11 @@ let convert (e : lambda) : ski =
     | App (e1, e2) -> App (ls_of_lambda e1, ls_of_lambda e2)
     | Abs (x, e) -> Abs (x, ls_of_lambda e)
   in
+  (* Convert intermediate ls term into ski term *)
   let rec ski_of_ls (e : ls) : ski =
     match e with
-    | Var _ -> failwith "shouldn't have Var anymore"
-    | Abs _ -> failwith "shouldn't have Abs anymore"
+    | Var _ -> failwith "should not have Var anymore"
+    | Abs _ -> failwith "should not have Abs anymore"
     | App (e1, e2) -> T (ski_of_ls e1, ski_of_ls e2)
     | Sl  -> S
     | Kl  -> K
