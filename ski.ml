@@ -1,6 +1,7 @@
 (* set to true to output debug information *)
 let debug = ref false
 
+(* lambda calculus AST *)
 type name = string
 type lambda =
   | Var of name
@@ -131,3 +132,112 @@ let t5 = ifte (T (T (f, (T (S, K))), K)) (I) (K)
 (* let _ = print_endline (pr_interp "t3" t3) (1* should be K *1) *)
 (* let _ = print_endline (pr_interp "t4" t4) (1* should be k *1) *)
 (* let _ = print_endline (pr_interp "t5" t5) (1* should be I *1) *)
+
+
+(* Completeness of SKI combinators *)
+(* Any lambda term can be translated to just SKI combinators *)
+
+(* Intermediate AST for converting lambda calculus into SKI combinators.
+ * This is needed because when converting, intermediate terms can be
+ * a mixture of both lambda terms and SKI terms, for example
+ * a lambda expression with a SKI body, \x . K
+ * *)
+type ls =
+  | Var of name
+  | App of ls * ls
+  | Abs of name * ls
+  | Sl
+  | Kl
+  | Il
+  | Tl of ls * ls
+
+(* String representation of ls *)
+let rec string_of_lc (l : ls) : string = match l with
+    | Var x -> x
+    | App (e1, e2) -> "(" ^ (string_of_lc e1) ^ (string_of_lc e2) ^ ")"
+    | Abs (x, e) -> "\\" ^ x ^ (string_of_lc e)
+    | Sl  -> "S"
+    | Kl  -> "K"
+    | Il  -> "I"
+    | Tl (e1, e2) ->  "(T " ^ (string_of_lc e1) ^ (string_of_lc e2) ^ ")"
+
+(* Is n free in the expression e? *)
+let free n (e : ls) =
+  (* Get free variables of an expression *)
+  let rec fv (e : ls) = match e with
+    | Var n -> [n]
+    | App (e1, e2) -> fv e1 @ fv e2
+    | Abs (n, e) -> List.filter (fun x -> x != n) (fv e)
+    | Tl (e1, e2) -> fv e1 @ fv e2
+    | _ -> []
+  in
+  List.mem n (fv e)
+
+(* This is the core algorithm to convert lambda terms into SKI combinators *)
+(* Translates a lambda term into an intermediate structure that can hold both lambda and SKI *)
+(* the clauses described here follows the rules of the T function described at *)
+(* https://en.wikipedia.org/wiki/Combinatory_logic#Completeness_of_the_S-K_basis *)
+let rec translate (e : ls) : ls = match e with
+  (* clause 1. *)
+  | Var x ->
+    Var x
+  (* clause 2. *)
+  | App (e1, e2) ->
+    App (translate e1, translate e2)
+  (* clause 3. *)
+  | Abs (x, e) when not (free x e) ->
+    App (Kl, translate e)
+  (* clause 4. *)
+  | Abs (n, Var n') ->
+    (* lambda x : x becomes identity *)
+    if n = n'
+    then Il
+    else failwith "error"
+  (* clause 5. *)
+  | Abs (x, Abs (y, e)) ->
+    if free x e
+    then translate (Abs (x, translate (Abs (y, e))))
+    else failwith "error"
+  (* clause 6. *)
+  | Abs (x, App (e1, e2)) ->
+    if free x e1 || free x e2
+    (* then App (Sl, App (translate (Abs (x, e1)), translate (Abs (x, e2)))) *)
+    then App (App (Sl, (translate (Abs (x, e1)))), translate (Abs (x, e2)))
+    else failwith "error"
+  | Kl -> Kl
+  | Sl -> Sl
+  | Il -> Il
+  | _ ->
+    failwith ("no matches for " ^ (string_of_lc e))
+
+(* Converts a lambda term into an SKI term *)
+let convert (e : lambda) : ski =
+  (* Convert lambda term into intermediate ls term *)
+  let rec ls_of_lambda (e : lambda) =
+    match e with
+    | Var x -> Var x
+    | App (e1, e2) -> App (ls_of_lambda e1, ls_of_lambda e2)
+    | Abs (x, e) -> Abs (x, ls_of_lambda e)
+  in
+  let rec ski_of_ls (e : ls) : ski =
+    match e with
+    | Var _ -> failwith "shouldn't have Var anymore"
+    | Abs _ -> failwith "shouldn't have Abs anymore"
+    | App (e1, e2) -> T (ski_of_ls e1, ski_of_ls e2)
+    | Sl  -> S
+    | Kl  -> K
+    | Il  -> I
+    | Tl (e1, e2) -> T (ski_of_ls e1, ski_of_ls e2)
+  in
+  (* convert lambda term into ls term *)
+  let ls_term = ls_of_lambda e in
+  (* translate ls term of lambda into ls term of combinators *)
+  let ls_comb = translate ls_term in
+  (* convert ls term into ski *)
+  ski_of_ls ls_comb
+
+(* Example lambda terms *)
+let l1 : lambda = Abs ("x", Var "x")
+let l2 : lambda = Abs ("x", Abs ("y", App (Var "y", Var "x")))
+
+let _ = print_endline (string_of_ski (convert l2))
