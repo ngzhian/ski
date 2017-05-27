@@ -1,8 +1,8 @@
 An experiment in SKI combinator calculus, below are the accompanying blog posts,
 originally on [my blog](https://blog.ngzhian.com):
 
-[SKI combinators - AST and Evaluating](https://blog.ngzhian.com/ski.html)
-[SKI combinators - Lambda to SKI](https://blog.ngzhian.com/ski2.html)
+1. [SKI combinators - AST and Evaluating](https://blog.ngzhian.com/ski.html)
+2. [SKI combinators - Lambda to SKI](https://blog.ngzhian.com/ski2.html)
 
 ---
 
