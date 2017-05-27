@@ -233,22 +233,32 @@ type ls =
   | Kl
   | Il
   | Tl of ls * ls
+
+(* String representation of ls *)
+let rec string_of_ls (l : ls) : string = match l with
+    | Var x -> x
+    | App (e1, e2) -> "(" ^ (string_of_ls e1) ^ (string_of_ls e2) ^ ")"
+    | Abs (x, e) -> "\\" ^ x ^ (string_of_ls e)
+    | Sl  -> "S"
+    | Kl  -> "K"
+    | Il  -> "I"
+    | Tl (e1, e2) ->  "(T " ^ (string_of_ls e1) ^ (string_of_ls e2) ^ ")"
 ```
 
 We will also need a helper function to determine if a variable is free in an expression:
 
 ```ocaml
-(* Is n free in the expression e? *)
-let free n (e : ls) =
+(* Is x free in the expression e? *)
+let free x (e : ls) =
   (* Get free variables of an expression *)
   let rec fv (e : ls) = match e with
-    | Var n -> [n]
+    | Var x -> [x]
     | App (e1, e2) -> fv e1 @ fv e2
-    | Abs (n, e) -> List.filter (fun x -> x != n) (fv e)
+    | Abs (x, e) -> List.filter (fun v -> v != x) (fv e)
     | Tl (e1, e2) -> fv e1 @ fv e2
     | _ -> []
   in
-  List.mem n (fv e)
+  List.mem x (fv e)
 ```
 
 The core translation algorithm then follows the translation scheme
@@ -269,36 +279,56 @@ directly into the SKI combinators.
  * *)
 let rec translate (e : ls) : ls = match e with
   (* clause 1. *)
+  (* you can't do much with a variable *)
   | Var x ->
     Var x
   (* clause 2. *)
+  (* an application remains an application, but with the terms translated *)
   | App (e1, e2) ->
     App (translate e1, translate e2)
   (* clause 3. *)
+  (* when x is not free in e, there can be two cases:
+   * 1. x does not appear in e at all,
+   * 2. x appears bound in e, Abs (x, e') is in e
+   * In both cases, whatever you apply this lambda term to will not affect
+   * the result of application:
+   * 1. since x is not used, you can ignore it
+   * 2. the x is bound to an inner argument, so it's really a different x from this
+   * hence this is really a constant term e,
+   * which is the same as the K combinator with e as the first argument.
+   * (recall that: K x y = x) *)
   | Abs (x, e) when not (free x e) ->
     App (Kl, translate e)
   (* clause 4. *)
-  | Abs (n, Var n') ->
-    (* lambda x : x becomes identity *)
-    if n = n'
+  | Abs (x, Var x') ->
+    (* this is the identity function, which is the I combinator *)
+    if x = x'
     then Il
+    (* we will never hit this case because, when x != x',
+     * we end up in clause 3, as x is not free in Var x' *)
     else failwith "error"
   (* clause 5. *)
   | Abs (x, Abs (y, e)) ->
+    (* when x is free in e, the x in e is the argument,
+     * we first translate the body into a combinator, to eliminate a layer of abstraction *)
     if free x e
     then translate (Abs (x, translate (Abs (y, e))))
     else failwith "error"
   (* clause 6. *)
   | Abs (x, App (e1, e2)) ->
+    (* eliminate the abstraction via application *)
+    (* Recall that S x y z = x z (y z),
+     * so applying the term Abs (x, App (e1, e2)) to an argument x
+     * will result in substituting x into the body of e1, x z,
+     * and e2, y z, and applying e1 to e2, x z (y z) *)
     if free x e1 || free x e2
-    (* then App (Sl, App (translate (Abs (x, e1)), translate (Abs (x, e2)))) *)
     then App (App (Sl, (translate (Abs (x, e1)))), translate (Abs (x, e2)))
     else failwith "error"
   | Kl -> Kl
   | Sl -> Sl
   | Il -> Il
   | _ ->
-    failwith "no matches"
+    failwith ("no matches for " ^ (string_of_ls e))
 ```
 
 Finally we can write the top level `convert` function we imagined earlier:
